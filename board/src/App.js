@@ -34,7 +34,7 @@ import {
   Redirect,
 } from 'react-router-dom';
 
-const AuthRoute = ({children, logged, ...props}) => (
+const AuthRoute = ({ children, logged, ...props }) => (
   <Route {...props}>{logged ? children : <Redirect to="/login" />}</Route>
 );
 
@@ -42,7 +42,7 @@ export default function App() {
   const config = useConfig();
   const [user, initialising, error] = useAuth();
   const [notifications, setNotifications] = useNotifications();
-  const logged = initialising || user;
+  const logged = user || initialising;
   const userScore = useUserScore(user && user.uid);
   if (error) console.error(error);
   const props = {

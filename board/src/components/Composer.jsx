@@ -1,26 +1,16 @@
-// Copyright 2019 Google LLC.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-import React, {useState, useRef, useEffect, useMemo} from 'react';
-// import Editor, { createEditorStateWithText } from 'draft-js-plugins-editor';
-import {Editor, EditorState, CompositeDecorator} from 'draft-js';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Editor, EditorState, CompositeDecorator } from 'draft-js';
 import 'draft-js/dist/Draft.css';
+import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import IconButton from '@material-ui/core/IconButton';
+import ExpandLessIcon from '@material-ui/icons/ExpandLess';
+import Tooltip from '@material-ui/core/Tooltip';
 import createHighlightPlugin from './draft-js-highlight-plugin.js';
 
-export default function Composer({highlight, onChange, disabled, placeholder}) {
+export default function Composer({ highlight, onChange, disabled, placeholder }) {
   const [editorState, setEditorState] = useState(EditorState.createEmpty());
   const [hasFocus, setFocus] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const editor = useRef();
 
   const focusEditor = () => {
@@ -29,18 +19,24 @@ export default function Composer({highlight, onChange, disabled, placeholder}) {
     setFocus(true);
   };
 
-  const onChangeEditorState = editorState => {
+  const onChangeEditorState = (editorState) => {
     setEditorState(editorState);
     onChange(editorState.getCurrentContent().getPlainText());
   };
 
+  const toggleExpand = () => {
+    setExpanded(!expanded);
+  };
+
   const borderColor = hasFocus && !disabled ? '#3f51b5' : 'rgba(0, 0, 0, 0.26)';
+  const height = expanded ? '10em' : '5em'; // Adjust the height based on the expanded state
+
   const decorator = useMemo(
-    () => new CompositeDecorator(createHighlightPlugin({highlight}).decorators),
+    () => new CompositeDecorator(createHighlightPlugin({ highlight }).decorators),
     [highlight]
   );
 
-  useEffect(() => setEditorState(e => EditorState.set(e, {decorator})), [
+  useEffect(() => setEditorState((e) => EditorState.set(e, { decorator })), [
     decorator,
   ]);
 
@@ -49,10 +45,10 @@ export default function Composer({highlight, onChange, disabled, placeholder}) {
       style={{
         borderWidth: 'thin',
         borderStyle: 'solid',
-        height: '10em',
-        minHeight: '10em',
+        height,
         overflowY: 'scroll',
         borderColor,
+        position: 'relative',
       }}
       onClick={focusEditor}
       className="MuiFormControl-root MuiTextField-root MuiFormControl-fullWidth"
@@ -62,13 +58,32 @@ export default function Composer({highlight, onChange, disabled, placeholder}) {
           spellCheck
           ref={editor}
           readOnly={disabled}
-          placeholder={placeholder}
+          placeholder=" " // Set an empty space as the placeholder
           editorState={editorState}
           onBlur={() => setFocus(false)}
           onFocus={() => setFocus(true)}
           onChange={onChangeEditorState}
+          style={{ height: '100%', overflowY: 'scroll', border: 'none' }} // Remove border to prevent double placeholder
         />
       </div>
+      <Tooltip title={expanded ? 'Collapse' : 'Expand More'} arrow>
+        <IconButton
+          onClick={toggleExpand}
+          style={{
+            position: 'absolute',
+            bottom: '0.5em',
+            right: '1em',
+            padding: '8px',
+            fontSize: '16px',
+            backgroundColor: 'transparent', // Set to transparent
+            color: expanded ? '#3f51b5' : '#2196f3',
+            borderRadius: '4px',
+            transition: 'color 0.3s',
+          }}
+        >
+          {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+        </IconButton>
+      </Tooltip>
     </div>
   );
 }

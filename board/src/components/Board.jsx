@@ -59,4 +59,4 @@ export default function Board({
       <Table config={config} data={data} game={game} />
     </>
   );
-}
+};

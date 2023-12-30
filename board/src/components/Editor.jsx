@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import csnlp from 'csnlp';
 // import FuzzySet from 'fuzzyset.js';
 import debounce from 'lodash.debounce';
-import {HashLink as Link} from 'react-router-hash-link';
+import { HashLink as Link } from 'react-router-hash-link';
+import firebaseConfig from '../config/firebase.json';
 
 // import wrapper from './wrapper.js';
 import Composer from './Composer.jsx';
@@ -24,7 +25,13 @@ import SmallTimer from './SmallTimer.jsx';
 import Tutorial from './Tutorial.jsx';
 import Dialog from './Dialog.jsx';
 import WikiSource from './WikiSource.jsx';
-import {getPage, getIndex, saveFib, Result} from '../config/server.js';
+import { getPage, getIndex, saveFib, Result } from '../config/server.js';
+import Backdrop from '@material-ui/core/Backdrop';
+import { gapi } from 'gapi-script';
+import GoogleDocViewer from 'react-google-docs-viewer';
+import axios from 'axios';
+
+
 
 import Autocomplete from '@material-ui/lab/Autocomplete';
 import Button from '@material-ui/core/Button';
@@ -34,6 +41,7 @@ import CardContent from '@material-ui/core/CardContent';
 import CardActions from '@material-ui/core/CardActions';
 import Card from '@material-ui/core/Card';
 import Switch from '@material-ui/core/Switch';
+import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 
 import IconButton from '@material-ui/core/IconButton';
 import Tooltip from '@material-ui/core/Tooltip';
@@ -78,7 +86,7 @@ function findFirstDiffPos(a, b) {
   }
 }
 
-function ScrollButton({index, handleStateChange}) {
+function ScrollButton({ index, handleStateChange }) {
   const handleScrollUpdate = event => {
     event.preventDefault();
     handleStateChange(index);
@@ -89,13 +97,13 @@ function ScrollButton({index, handleStateChange}) {
     <IconButton
       aria-label="Scroll to sentence"
       size="small"
-      style={{padding: 5, right: 10, position: 'absolute'}}
+      style={{ padding: 5, right: 10, position: 'absolute' }}
       onClick={handleScrollUpdate}
     >
       <Link
         size="small"
-        to={{hash: '#line' + index}}
-        style={{color: 'inherit'}}
+        to={{ hash: '#line' + index }}
+        style={{ color: 'inherit' }}
       >
         <LinkIcon size="small" />
       </Link>
@@ -103,18 +111,18 @@ function ScrollButton({index, handleStateChange}) {
   );
 }
 
-const RenderResult = ({index, doc, action, highlight, update, isEvidence}) => (
+const RenderResult = ({ index, doc, action, highlight, update, isEvidence }) => (
   <>
     <Card
       key={'card' + index}
-      style={{backgroundColor: isEvidence && '#CFB87C'}}
+      style={{ backgroundColor: isEvidence && '#CFB87C' }}
       elevation={3}
     >
       {/*<CardHeader title={doc.name} action={action} />*/}
       <CardContent>
         <Highlighted text={doc.line} highlight={highlight} />
       </CardContent>
-      <CardActions style={{position: 'relative'}}>
+      <CardActions style={{ position: 'relative' }}>
         <FormControlLabel
           control={
             <Switch
@@ -127,7 +135,7 @@ const RenderResult = ({index, doc, action, highlight, update, isEvidence}) => (
             <>
               Gold evidence
               <Tooltip title="Mark the evidence that supports or rejects your claim. Players will see this as a last clue.">
-                <HelpIcon style={{marginLeft: 5, fontSize: '1em'}} />
+                <HelpIcon style={{ marginLeft: 5, fontSize: '1em' }} />
               </Tooltip>
             </>
           }
@@ -138,7 +146,7 @@ const RenderResult = ({index, doc, action, highlight, update, isEvidence}) => (
   </>
 );
 
-const Highlighted = ({text, highlight}) => {
+const Highlighted = ({ text, highlight }) => {
   if (!highlight) {
     return <span>{text}</span>;
   }
@@ -183,9 +191,9 @@ const Highlighted = ({text, highlight}) => {
 //   );
 // }
 
-const TocSource = ({title, link}) => {
+const TocSource = ({ title, link }) => {
   return (
-    <Link to={{hash: '#line' + link}}>
+    <Link to={{ hash: '#line' + link }}>
       <span>
         {title}
         <br />
@@ -194,14 +202,14 @@ const TocSource = ({title, link}) => {
   );
 };
 
-const RenderSource = ({title, index, par, selected, text, updateEvidence}) => {
+const RenderSource = ({ title, index, par, selected, text, updateEvidence }) => {
   const color = selected ? '#f3eaaf' : undefined;
   if (title) {
     return (
       <span key={index}>
         <h2 key={'header' + index}>{title}</h2>
         <span
-          style={color && {backgroundColor: color}}
+          style={color && { backgroundColor: color }}
           id={'line' + index}
           onClick={e => updateEvidence(index, e)}
         >
@@ -214,7 +222,7 @@ const RenderSource = ({title, index, par, selected, text, updateEvidence}) => {
   } else {
     return (
       <span
-        style={color && {backgroundColor: color}}
+        style={color && { backgroundColor: color }}
         onClick={e => updateEvidence(index, e)}
         id={'line' + index}
       >
@@ -252,6 +260,7 @@ export default class Editor extends React.Component {
       candidate: '',
       evidence: [],
       veracity: initVeracity || 'TRUE',
+      isExpanded: false,
     };
 
     this.stopwords = require('stopword');
@@ -259,8 +268,12 @@ export default class Editor extends React.Component {
     this.searchDebounced = debounce(this.search, 500);
   }
 
+  toggleExpand = () => {
+    this.setState((prevState) => ({ isExpanded: !prevState.isExpanded }));
+  };
+
   componentDidMount() {
-    const {page} = this.props;
+    const { page } = this.props;
     if (page) this.onChange(page);
   }
 
@@ -270,16 +283,16 @@ export default class Editor extends React.Component {
 
   updatePage = e => {
     console.log('Candidate is', this.state.candidate);
-    this.setState({page: this.state.candidate});
+    this.setState({ page: this.state.candidate });
     console.log('State is', this.state.page);
     getPage(this.state.page)
       .then(sentences => {
-        this.setState({collection: sentences});
+        this.setState({ collection: sentences });
       })
       .catch(err => console.error(err));
     getIndex(this.state.page)
       .then(terms => {
-        this.setState({index: lunr.Index.load(terms)});
+        this.setState({ index: lunr.Index.load(terms) });
       })
       .catch(err => console.error(err));
   };
@@ -289,17 +302,17 @@ export default class Editor extends React.Component {
     // updateState(index, true);
 
     console.log('Editor SC', this.state.sourceSent, index);
-    this.setState({sourceSent: index});
+    this.setState({ sourceSent: index });
   };
 
   updateCandidate = (event, value) => {
     console.log('update candidate', value);
-    this.setState({candidate: value, page: value});
+    this.setState({ candidate: value, page: value });
     getIndex(value)
       .then(terms => {
         var lunrIndex = lunr.Index.load(terms);
         console.log('Got index', lunrIndex);
-        this.setState({index: lunrIndex});
+        this.setState({ index: lunrIndex });
       })
       .catch(err => console.error(err));
     console.log('Collection is', this.state.collection);
@@ -307,14 +320,14 @@ export default class Editor extends React.Component {
     getPage(value)
       .then(doc => {
         console.log('Got doc', doc);
-        this.setState({collection: doc['sentences']});
+        this.setState({ collection: doc['sentences'] });
       })
       .catch(err => console.error(err));
     console.log('Collection is', this.state.collection);
   };
 
   updateEvidence = (line, event) => {
-    const {evidence, collection, index, query} = this.state;
+    const { evidence, collection, index, query } = this.state;
 
     console.log('Evidence', evidence);
     let newEvidence;
@@ -325,12 +338,13 @@ export default class Editor extends React.Component {
       newEvidence = evidence.concat([line]);
     }
 
-    this.setState({evidence: newEvidence});
+    this.setState({ evidence: newEvidence });
 
     console.log('Update evidence', line, newEvidence);
 
     this.searchDebounced(collection, index, query);
   };
+
 
   isContextual(text, page) {
     const tokens = csnlp.tokenizeTB(text.toLowerCase());
@@ -344,7 +358,7 @@ export default class Editor extends React.Component {
   }
 
   saveFib() {
-    const {query, evidence, collection, veracity, results, page} = this.state;
+    const { query, evidence, collection, veracity, results, page } = this.state;
 
     const fib = {
       claim: query,
@@ -354,9 +368,9 @@ export default class Editor extends React.Component {
       page,
     };
 
-    const {onComplete} = this.props;
-    this.setState({loading: true});
-    saveFib(fib).then(({id}) => onComplete && onComplete(Result.RIGHT, id));
+    const { onComplete } = this.props;
+    this.setState({ loading: true });
+    saveFib(fib).then(({ id }) => onComplete && onComplete(Result.RIGHT, id));
   }
 
   render() {
@@ -372,10 +386,11 @@ export default class Editor extends React.Component {
       evidence,
       tutorialDone,
       finalDialog,
+      isExpanded,
     } = this.state;
-    const {onComplete, config} = this.props;
+    const { onComplete, config } = this.props;
     const veracityControlled = this.props.veracity !== undefined;
-    const loaded = page !== '' ? {display: 'none'} : {};
+    const loaded = page !== '' ? { display: 'none' } : {};
     let placeholder = undefined;
     if (page)
       placeholder = page
@@ -397,8 +412,71 @@ export default class Editor extends React.Component {
           'explicitly. If that is the case, disregard this message.';
     }
 
-    const kTotalWriteMinutes = config.getNumber('kTotalWriteMinutes');
 
+    function makeGoogleDocsApiCall() {
+      const accessToken = localStorage.getItem('accessToken');
+      const createApiUrl = 'https://docs.googleapis.com/v1/documents';
+
+      const documentTitle = 'AdvQA Playground';
+      const documentContent = '<Use this space to write your adversarial questions: >';
+
+      const requestBody = {
+        title: documentTitle,
+        body: {
+          content: [
+            {
+              paragraph: {
+                elements: [
+                  {
+                    textRun: {
+                      content: documentContent,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      };
+
+      if (localStorage.getItem('documentId')) {
+        const documentId = localStorage.getItem('documentId');
+        const documentUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+        window.open(documentUrl, '_blank');
+        return;
+      }
+
+      fetch(createApiUrl, {
+        method: 'POST',
+        headers: new Headers({
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify(requestBody),
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          return response.json();
+        })
+        .then(data => {
+          console.log('Google Docs API Response:', data);
+
+          // Access additional information from the response
+          const documentId = data.documentId;
+          localStorage.setItem('documentId', documentId);
+          // You can use documentId and revisionId as needed for further operations
+
+          const documentUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+          window.open(documentUrl, '_blank');
+        })
+        .catch(error => {
+          console.error('Error initializing Google Docs API:', error);
+        });
+    }
+
+    const kTotalWriteMinutes = config.getNumber('kTotalWriteMinutes');
     return (
       <>
         <Dialog
@@ -406,7 +484,7 @@ export default class Editor extends React.Component {
           title="Awesome! You'll get 100 points..."
           loading={loading}
           content="Other players will start seeing your statement and you will get more points for fooling them"
-          handleClose={() => this.setState({finalDialog: false})}
+          handleClose={() => this.setState({ finalDialog: false })}
           handleConfirm={() => this.saveFib()}
         />
         <Tutorial
@@ -414,15 +492,16 @@ export default class Editor extends React.Component {
           minutes={kTotalWriteMinutes}
           veracity={veracity}
           open={!tutorialDone}
-          handleClose={() => this.setState({tutorialDone: true})}
+          handleClose={() => this.setState({ tutorialDone: true })}
         />
-        <div className="app-container" style={{width: '38%'}}>
+        <div className="app-container" style={{ width: '38%' }}>
+
           <Paper
             elevation={1}
             style={{
               padding: 15,
               margin: 10,
-              height: 'Calc(100vh - 85px)',
+              height: isExpanded ? 'Calc(100vh - 85px)' : 'auto',
               flexFlow: 'column',
               display: 'flex',
             }}
@@ -441,7 +520,7 @@ export default class Editor extends React.Component {
                 )}
                 onChange={this.updateCandidate}
               />
-              <Typography variant="h4" style={{marginBottom: 5}}>
+              <Typography variant="h4" style={{ marginBottom: 5 }}>
                 {onComplete && (
                   <IconButton onClick={() => onComplete(Result.CANCEL)}>
                     <ArrowBackIosIcon />
@@ -450,7 +529,7 @@ export default class Editor extends React.Component {
                 {page}
                 <SmallTimer
                   total={kTotalWriteMinutes}
-                  style={{float: 'right'}}
+                  style={{ float: 'right' }}
                   running={tutorialDone}
                 />
               </Typography>
@@ -461,22 +540,22 @@ export default class Editor extends React.Component {
               disabled={!page}
               onChange={value => this.onChange(value)}
             />
-            <div style={{paddingTop: 10, textAlign: 'right'}}>
+            <div style={{ paddingTop: 10, textAlign: 'right' }}>
               {!veracityControlled && (
                 <ButtonGroup
                   aria-label="claim truth status"
-                  style={{marginRight: 10}}
+                  style={{ marginRight: 10 }}
                 >
                   <Button
                     color={veracity === 'FALSE' ? 'primary' : undefined}
-                    onClick={() => this.setState({veracity: 'FALSE'})}
+                    onClick={() => this.setState({ veracity: 'FALSE' })}
                     disabled={!page || !value}
                   >
                     Fib
                   </Button>
                   <Button
                     color={veracity === 'TRUE' ? 'primary' : undefined}
-                    onClick={() => this.setState({veracity: 'TRUE'})}
+                    onClick={() => this.setState({ veracity: 'TRUE' })}
                     disabled={!page || !value}
                   >
                     Fact
@@ -485,7 +564,7 @@ export default class Editor extends React.Component {
               )}
               <Tooltip title="See the tutorial">
                 <IconButton
-                  onClick={() => this.setState({tutorialDone: false})}
+                  onClick={() => this.setState({ tutorialDone: false })}
                 >
                   <HelpIcon />
                 </IconButton>
@@ -493,7 +572,7 @@ export default class Editor extends React.Component {
               <Button
                 onClick={() =>
                   onComplete
-                    ? this.setState({finalDialog: true})
+                    ? this.setState({ finalDialog: true })
                     : this.saveFib()
                 }
                 disabled={
@@ -511,7 +590,17 @@ export default class Editor extends React.Component {
               >
                 {veracityControlled ? `Save ${veracity} statement` : 'Save'}
               </Button>
-              <div style={{color: '#f44336'}}>{hint}</div>
+              <Button
+                onClick={makeGoogleDocsApiCall}
+                variant="contained"
+                color="primary"
+                startIcon={<SaveIcon />}
+                style={{ marginLeft: 10 }}
+              >
+                Docs
+              </Button>
+              <div style={{ color: '#f44336' }}>{hint}</div>
+
             </div>
             <Typography variant="h5" gutterBottom>
               Evidence ({this.state.evidence.length} marked as gold)
@@ -560,13 +649,84 @@ export default class Editor extends React.Component {
     );
   }
 
+
+
   onChange(value) {
-    const {index, collection, page} = this.state;
+    const { index, collection, page } = this.state;
     if (this.state.value === value) return;
-    this.setState({value, evidence: value ? this.state.evidence : []});
+    this.setState({ value, evidence: value ? this.state.evidence : [] });
     if (!page) return;
 
-    // Search if index and collection has been loaded
+    function readParagraphElement(element) {
+      const textRun = element.textRun;
+      if (!textRun) {
+        return '';
+      }
+      return textRun.content;
+    }
+
+    function readStructuralElements(elements) {
+      let text = '';
+      elements.forEach(value => {
+        if (value.paragraph) {
+          const paragraphElements = value.paragraph.elements;
+          paragraphElements.forEach(elem => {
+            text += readParagraphElement(elem);
+          });
+        } else if (value.table) {
+          const table = value.table;
+          table.tableRows.forEach(row => {
+            row.tableCells.forEach(cell => {
+              text += readStructuralElements(cell.content);
+            });
+          });
+        } else if (value.tableOfContents) {
+          const toc = value.tableOfContents;
+          text += readStructuralElements(toc.content);
+        }
+      });
+      return text;
+    }
+
+
+    // Periodically fetch the latest version of the document every 15 seconds
+    const fetchDocument = async () => {
+      try {
+        const documentId = '1BO0S9pEangvWq4le1sdFZi54YEyKhgbFY8YUbqGu1hE'; // Replace with your documentId
+        const response = await axios.get(
+          `https://docs.googleapis.com/v1/documents/${documentId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+            },
+          }
+        );
+
+        // Extract the content array from the response
+        const contentArray = response.data.body.content;
+        const updatedValue = readStructuralElements(contentArray);
+        // Update the state with the content array
+        this.setState(prevState => ({
+          ...prevState,
+          documentContent: contentArray,
+          value: updatedValue,
+        }));
+      } catch (error) {
+        console.error('Error fetching Google Document:', error);
+      }
+    };
+
+
+    // Fetch the document content initially
+    fetchDocument();
+
+    // Fetch the document content every 15 seconds
+    const intervalId = setInterval(fetchDocument, 15000);
+
+    // Clean up the interval when the component unmounts
+    this.setState({ documentFetchIntervalId: intervalId });
+
+    // Search if index and collection have been loaded
     if (collection.length > 0 && index) {
       this.searchDebounced(collection, index, value);
       return;
@@ -577,11 +737,15 @@ export default class Editor extends React.Component {
           const [terms, doc] = results;
           const index = lunr.Index.load(terms);
           const collection = doc.sentences;
-          this.setState({index, collection});
+          this.setState({ index, collection });
           this.searchDebounced(collection, index, value);
         })
         .catch(console.error);
     }
+  }
+  componentWillUnmount() {
+    // Clear the interval when the component is unmounted
+    clearInterval(this.intervalId);
   }
 
   search(collection, index, query) {
@@ -666,7 +830,7 @@ class Source extends React.Component {
   render() {
     const sources = [];
     const toc = [];
-    const {paragraphs, selected, page} = this.props;
+    const { paragraphs, selected, page } = this.props;
     let lastSection = '';
 
     toc.push(<h3 key="toc">Table of Contents</h3>);

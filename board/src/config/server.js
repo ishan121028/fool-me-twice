@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React from 'react';
-import firebase from 'firebase/app';
-import 'firebase/analytics';
-import 'firebase/firestore';
-import 'firebase/performance';
-import 'firebase/auth';
-import 'firebase/storage';
-import 'firebase/remote-config';
+import React, { useEffect } from 'react';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/analytics';
+import 'firebase/compat/firestore';
+import 'firebase/compat/performance';
+import 'firebase/compat/auth';
+import 'firebase/compat/storage';
+import 'firebase/compat/remote-config';
+import { GoogleLogin } from '@react-oauth/google';
+import gapiConfig from "../config/gapi.json"
+
 import {
   useDocumentData,
   useCollectionData,
 } from 'react-firebase-hooks/firestore';
-import {useAuthState} from 'react-firebase-hooks/auth';
+import { useAuthState } from 'react-firebase-hooks/auth';
 import firebaseConfig from './firebase.json';
 import chunk from 'lodash.chunk';
 import flatten from 'lodash.flatten';
+import { GoogleOAuthProvider } from '@react-oauth/google';
+import { gapi } from 'gapi-script';
 
 export const firebaseApp = firebase.initializeApp(firebaseConfig);
 export const analytics = firebase.analytics();
@@ -39,6 +44,8 @@ const storage = firebase.storage();
 //   minimumFetchIntervalMillis: 60 * 60 * 1000,
 // };
 
+
+
 remoteConfig.defaultConfig = {
   kWorkflowID: 'default',
   kTotalVoteMinutes: 3,
@@ -47,6 +54,13 @@ remoteConfig.defaultConfig = {
   kSecondsPenalty: 10,
   kShowRevealButton: true,
 };
+
+const AUTH_SCOPES = [
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/analytics.readonly',
+]
+
 
 export const logLevelEvent = (event, item, status, success, seconds) => {
   analytics.logEvent(event, {
@@ -59,9 +73,21 @@ export const logLevelEvent = (event, item, status, success, seconds) => {
 };
 
 export const logout = () => {
-  firebaseApp.auth().signOut();
-};
+  const accessToken = localStorage.getItem('accessToken');
+  if (accessToken) {
+    fetch({
+      method: 'GET',
+      url: 'https://accounts.google.com/o/oauth2/revoke?token=' + accessToken
+    });
+    localStorage.removeItem('accessToken');
+    sessionStorage.removeItem('documentId');
+    firebaseApp.auth().signOut();
+  }
+  else {
+    firebaseApp.auth().signOut();
+  };
 
+};
 export const getUserID = () =>
   firebase.auth().currentUser && firebase.auth().currentUser.uid;
 
@@ -118,9 +144,9 @@ export const getWikipediaImages = pages =>
       fetch(WIKI_URL + p.join('|'))
         .then(response => response.json())
         .then(data => data.query)
-        .then(({redirects, pages}) => {
+        .then(({ redirects, pages }) => {
           const redirectMap = new Map(
-            (redirects || []).map(({to, from}) => [to, from])
+            (redirects || []).map(({ to, from }) => [to, from])
           );
           return Object.values(pages).map(page => [
             redirectMap.get(page.title) || page.title,
@@ -150,24 +176,58 @@ export const getWorkflow = name => getFromStorage('workflow', name.trim());
 export const useDB = (collection, doc) =>
   useDocumentData(db.collection(collection).doc(doc));
 
-export const login = authResult => {
-  const user = authResult.user;
-  const isNewUser = authResult.additionalUserInfo.isNewUser;
-  const ref = db.collection('users').doc(user.uid);
-  if (isNewUser)
-    ref.set({
-      displayName: user.displayName,
-      // photoURL: user.photoURL,
-      // email: user.email,
-      emailVerified: user.emailVerified,
-      isAnonymous: user.isAnonymous,
-      created: firebase.firestore.FieldValue.serverTimestamp(),
-      lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+export const login = (response) => {
+
+  if (response.profileObj) {
+    const { email, familyName, givenName, googleId, imageUrl } = response.profileObj;
+
+    const credential = firebase.auth.GoogleAuthProvider.credential(
+      response.tokenId,
+      response.accessToken
+    );
+    gapi.load(`client:auth2`, () => {
+      gapi.client.init({
+        apiKey: firebaseConfig.apiKey,
+        clientId: gapiConfig.clientId,
+        scope: "profile email https://www.googleapis.com/auth/documents",
+      });
     });
-  else
-    ref.update({
-      lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    const accessToken = gapi.auth.getToken().access_token;
+    localStorage.setItem('accessToken', accessToken);
+
+    firebaseApp
+      .auth()
+      .signInWithCredential(credential)
+      .then(({ user }) => {
+
+        const isNewUser = true;
+
+        if (user.createdAt < user.lastLoginAt) {
+          isNewUser = false;
+        }
+
+        const ref = db.collection('users').doc(user.uid);
+        if (isNewUser)
+          ref.set({
+            displayName: user.displayName,
+            // photoURL: user.photoURL,
+            // email: user.email,
+            emailVerified: user.emailVerified,
+            isAnonymous: user.isAnonymous,
+            created: firebase.firestore.FieldValue.serverTimestamp(),
+            lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+        else
+          ref.update({
+            lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+        console.log('User signed in with Firebase:', user);
+      })
+      .catch((error) => {
+        console.error('Firebase sign-in error:', error);
+      });
+
+  };
 };
 
 export const Result = {
@@ -199,7 +259,7 @@ export const rateFibs = (goodFib, badFib) => {
       .doc(goodFib.id)
       .collection('likes')
       .doc(user.uid);
-    batch.set(like, {created: firebase.firestore.FieldValue.serverTimestamp()});
+    batch.set(like, { created: firebase.firestore.FieldValue.serverTimestamp() });
   }
   if (badFib) {
     const dislike = db
@@ -230,6 +290,47 @@ export const secureFetch = (path, config) =>
       })
     );
 
+export const makeGoogleDocsApiCall = () => {
+  gapi.load(`client:auth2`, () => {
+    gapi.client.init({
+      apiKey: firebaseConfig.apiKey,
+      clientId: gapiConfig.clientId,
+      scope: "profile email https://www.googleapis.com/auth/documents",
+    });
+  });
+
+  // Replace 'YOUR_API_KEY' with the actual API key for the Google Docs API
+  const apiKey = firebaseConfig.apiKey;
+  const accessToken = gapi.auth.getToken().access_token;
+  localStorage.setItem('accessToken', accessToken);
+  const createApiUrl = `https://docs.googleapis.com/v1/documents`;
+  console.log(accessToken)
+
+
+  fetch(createApiUrl, {
+    method: 'POST',
+    headers: new Headers({
+      'Authorization': `Bearer ${accessToken}`
+    })
+  })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log('Google Docs API Response:', data);
+      const documentUrl = `https://docs.google.com/document/d/${data.documentId}/edit`;
+      window.open(documentUrl, '_blank');
+    })
+    .catch(error => {
+      console.error('Google Docs API Error:', error);
+    });
+};
+
+
+
 export const castVote = (fibs, index, time, trueSeconds, reveal) =>
   secureFetch('createVote', {
     method: 'POST',
@@ -249,7 +350,7 @@ export const useUserStatus = () => {
     db
       .collection('status')
       .doc(userId)
-      .set(status, {merge: true});
+      .set(status, { merge: true });
   React.useEffect(() => {
     if (!userId) return;
     return db
@@ -267,13 +368,13 @@ export const useNotifications = () => {
     db
       .collection('notifications')
       .doc(userId)
-      .set({list: notifs});
+      .set({ list: notifs });
   React.useEffect(() => {
     if (!userId) return;
     return db
       .collection('notifications')
       .doc(userId)
-      .onSnapshot(doc => setNotifications((doc.data() || {list: []}).list));
+      .onSnapshot(doc => setNotifications((doc.data() || { list: [] }).list));
   }, [userId]);
   return [notifications, saveNotifications];
 };
@@ -320,14 +421,14 @@ export const getFibs = game =>
   Array.isArray(game)
     ? getFibsByID(game)
     : db
-        .collection('fibs')
-        .where('game', 'in', [parseInt(game), game.toString()])
-        .get()
-        .then(snapshot => {
-          const result = [];
-          snapshot.forEach(fib => result.push({id: fib.id, ...fib.data()}));
-          return result;
-        });
+      .collection('fibs')
+      .where('game', 'in', [parseInt(game), game.toString()])
+      .get()
+      .then(snapshot => {
+        const result = [];
+        snapshot.forEach(fib => result.push({ id: fib.id, ...fib.data() }));
+        return result;
+      });
 
 export const getFibsByID = claims =>
   Promise.all(
@@ -336,24 +437,24 @@ export const getFibsByID = claims =>
         .collection('fibs')
         .doc(claim)
         .get()
-        .then(c => ({id: c.id, ...c.data()}))
+        .then(c => ({ id: c.id, ...c.data() }))
     )
   );
 
 export const saveFib = fib =>
   fib.id
     ? db
-        .collection('fibs')
-        .doc(fib.id)
-        .set(fib)
+      .collection('fibs')
+      .doc(fib.id)
+      .set(fib)
     : db
-        .collection('fibs')
-        .add({
-          ...fib,
-          author: getUserID(),
-          created: firebase.firestore.FieldValue.serverTimestamp(),
-        })
-        .catch(console.error);
+      .collection('fibs')
+      .add({
+        ...fib,
+        author: getUserID(),
+        created: firebase.firestore.FieldValue.serverTimestamp(),
+      })
+      .catch(console.error);
 
 export const useLeaderboard = orderBy =>
   useCollectionData(

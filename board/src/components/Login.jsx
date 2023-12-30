@@ -1,30 +1,18 @@
-// Copyright 2019 Google LLC.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 import Typography from '@material-ui/core/Typography';
 import Container from '@material-ui/core/Container';
 import Avatar from '@material-ui/core/Avatar';
 import LockOutlinedIcon from '@material-ui/icons/LockOutlined';
-import {makeStyles} from '@material-ui/core/styles';
+import { makeStyles } from '@material-ui/core/styles';
+import firebaseConfig from '../config/firebase.json';
+import firebase from 'firebase/compat/app';
+import firebaseApp, { login } from '../config/server.js';
+import { GoogleLogin } from 'react-google-login';
+import { gapi } from 'gapi-script';
+import gapiConfig from "../config/gapi.json"
 
-import firebase from 'firebase/app';
-import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth';
-import firebaseApp, {login} from '../config/server.js';
-
-const useStyles = makeStyles(theme => ({
+const useStyles = makeStyles((theme) => ({
   paper: {
     marginTop: theme.spacing(8),
     display: 'flex',
@@ -37,19 +25,27 @@ const useStyles = makeStyles(theme => ({
   },
 }));
 
-const uiConfig = {
-  signInFlow: 'popup',
-  signInOptions: [
-    firebase.auth.GoogleAuthProvider.PROVIDER_ID,
-    // firebase.auth.EmailAuthProvider.PROVIDER_ID,
-  ],
-  callbacks: {
-    signInSuccessWithAuthResult: login,
-  },
-};
 
 export default function Login() {
+  // useEffect(() => {
+  //   function start() {
+  //     gapi.client.init({
+  //       apiKey: firebaseConfig.apiKey,
+  //       clientId: gapiConfig.clientId,
+  //       scope: "profile email https://www.googleapis.com/auth/documents",
+  //     });
+  //   };
+  //   gapi.load('client:auth2', start);
+
+  //   const accessToken = gapi.auth.getToken().access_token;
+  // });
+
+
+
+  // console.log(gapi.auth.getToken().access_token);
+
   const classes = useStyles();
+
   return (
     <Container maxWidth="sm" className={classes.paper}>
       <Typography
@@ -67,9 +63,13 @@ export default function Login() {
       <Typography component="h1" variant="h5">
         Sign in to play
       </Typography>
-      <StyledFirebaseAuth
-        uiConfig={uiConfig}
-        firebaseAuth={firebaseApp.auth()}
+
+      <GoogleLogin
+        clientId={gapiConfig.clientId}
+        buttonText="Sign In with Google"
+        onSuccess={login}
+        onFailure={login}
+        scope="profile email https://www.googleapis.com/auth/documents"
       />
     </Container>
   );
